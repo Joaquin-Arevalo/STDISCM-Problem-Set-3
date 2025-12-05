@@ -1,0 +1,14 @@
+{
+  "name": "media-producer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/producer.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.10.0",
+    "@grpc/proto-loader": "^0.7.8",
+    "dotenv": "^16.4.0"
+  }
+}

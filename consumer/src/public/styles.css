@@ -1,0 +1,11 @@
+/* consumer/src/public/styles.css */
+body { font-family: sans-serif; margin: 20px; }
+#gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.card { border: 1px solid #ddd; border-radius: 8px; padding: 8px; }
+.card video { width: 100%; border-radius: 6px; background: #000; }
+.card .meta { margin-top: 6px; font-size: 12px; color: #555; }
+
+.modal { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; }
+.modal.hidden { display: none; }
+.modal-content { background:#fff; padding:16px; border-radius:8px; position:relative; }
+#closeBtn { position:absolute; top:8px; right:12px; cursor:pointer; font-size:24px; }

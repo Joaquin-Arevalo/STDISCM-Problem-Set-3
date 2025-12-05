@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package media;
+
+service MediaUpload {
+  // Client-streaming upload: first message must be metadata.
+  rpc UploadVideo(stream UploadChunk) returns (UploadStatus);
+
+  // List uploaded media for GUI/API.
+  rpc ListMedia(ListRequest) returns (ListResponse);
+}
+
+message UploadChunk {
+  oneof payload {
+    VideoMeta meta = 1;
+    bytes data = 2;
+  }
+}
+
+message VideoMeta {
+  string filename = 1;
+  string contentType = 2; // e.g. "video/mp4"
+  int64 sizeBytes = 3;    // optional
+  string sourceId = 4;    // producer/source identifier
+}
+
+message UploadStatus {
+  bool accepted = 1;      // false if dropped due to full queue
+  string message = 2;     // diagnostic info
+  string storedPath = 3;  // relative path if accepted and saved
+}
+
+message ListRequest {}
+
+message MediaItem {
+  string filename = 1;
+  string url = 2;         // consumer GUI-serving URL
+  int64 sizeBytes = 3;
+  string contentType = 4;
+}
+
+message ListResponse {
+  repeated MediaItem items = 1;
+}
