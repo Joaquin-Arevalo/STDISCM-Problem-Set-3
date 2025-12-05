@@ -1,6 +1,7 @@
 // consumer/src/server.js
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const { BoundedQueue } = require('./queue');
 const { writeStreamToFile, listMedia } = require('./storage');
 
@@ -20,54 +21,108 @@ function UploadVideo(call, callback) {
   let accepted = false;
   let writeStream = null;
   let storedPath = null;
-  let writePromise = null;
+  let bufferedChunks = []; // Buffer chunks until writeStream is ready
+  let jobStarted = false;
+  let allDataReceived = false;
+  let callEnded = false;
 
   function finishUpload(statusMessage) {
-    if (writeStream) writeStream.end();
-    callback(null, { accepted, message: statusMessage, storedPath });
+    if (!callEnded) {
+      callEnded = true;
+      callback(null, { accepted, message: statusMessage, storedPath });
+    }
   }
 
   call.on('data', chunk => {
     if (chunk.meta) {
-      if (meta) return; // ignore duplicate meta
+      if (meta) return;
       meta = chunk.meta;
+      console.log(`[DATA_RECEIVED] Metadata for "${meta.filename}"`);
 
       const job = {
         run: async () => {
+          jobStarted = true;
+          console.log(`[JOB_START] Processing "${meta.filename}"`);
           const { writeStream: ws, destPath } = writeStreamToFile(meta.filename);
           writeStream = ws;
           storedPath = path.basename(destPath);
           
-          // Wait for the file write to complete
-          writePromise = new Promise((resolve, reject) => {
-            ws.on('finish', resolve);
-            ws.on('error', reject);
-          });
+          // Write all buffered chunks that arrived before job started
+          if (bufferedChunks.length > 0) {
+            console.log(`[JOB_START] Writing ${bufferedChunks.length} buffered chunks for "${meta.filename}"`);
+            for (const bufferedChunk of bufferedChunks) {
+              writeStream.write(bufferedChunk);
+            }
+            bufferedChunks = [];
+          }
           
-          // Return the promise so the queue waits for the entire file write
-          return writePromise;
+          return new Promise((resolve, reject) => {
+            ws.on('finish', () => {
+              console.log(`[JOB_END] Finished writing "${meta.filename}"`);
+              resolve();
+            });
+            ws.on('error', (err) => {
+              console.log(`[JOB_ERROR] Error writing "${meta.filename}": ${err.message}`);
+              reject(err);
+            });
+            
+            // If all data already received before job started, end stream now
+            if (allDataReceived) {
+              console.log(`[JOB_START] All data already received, ending writeStream for "${meta.filename}"`);
+              ws.end();
+            }
+          });
         }
       };
 
       accepted = queue.tryEnqueue(job);
       if (!accepted) {
-        // Leaky bucket: drop gracefully
         finishUpload('Queue full. Upload dropped.');
-        // End the call to stop receiving further data
       }
     } else if (chunk.data) {
-      if (writeStream) {
+      if (writeStream && !writeStream.destroyed) {
+        // Stream is ready, write directly
         writeStream.write(chunk.data);
-      } // else chunk arrives before meta or before job starts; safely ignore
+      } else if (!jobStarted) {
+        // Job hasn't started yet, buffer the chunk
+        bufferedChunks.push(chunk.data);
+      }
     }
   });
 
   call.on('end', () => {
-    finishUpload(accepted ? 'Upload completed.' : 'Upload not accepted.');
+    allDataReceived = true;
+    console.log(`[STREAM_END] All data received for "${meta ? meta.filename : 'unknown'}"`);
+    
+    // If job already started and writeStream exists, end it now
+    if (jobStarted && writeStream && !writeStream.destroyed) {
+      console.log(`[STREAM_END] Ending writeStream for "${meta.filename}"`);
+      writeStream.end();
+    }
+    
+    // Wait for job to start before sending response
+    if (!callEnded) {
+      const checkInterval = setInterval(() => {
+        if (jobStarted || !accepted) {
+          clearInterval(checkInterval);
+          finishUpload(accepted ? 'Upload completed.' : 'Upload not accepted.');
+        }
+      }, 50);
+      
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        if (!callEnded) {
+          finishUpload(accepted ? 'Upload completed.' : 'Upload not accepted.');
+        }
+      }, 5000);
+    }
   });
 
   call.on('error', err => {
-    finishUpload(`Upload error: ${err.message}`);
+    if (!callEnded) {
+      finishUpload(`Stream error: ${err.message}`);
+    }
   });
 }
 
